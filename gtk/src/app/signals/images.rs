@@ -1,4 +1,4 @@
-use crate::app::events::{BackgroundEvent, UiEvent};
+use crate::app::events::{is_supported_image_path, BackgroundEvent, UiEvent};
 use crate::app::state::State;
 use crate::app::widgets::OpenDialog;
 use crate::app::{App, GtkUi};
@@ -9,11 +9,9 @@ use std::path::{Path, PathBuf};
 impl App {
     pub fn connect_image_chooser(&self) {
         let state = self.state.clone();
-        let ui = self.ui.clone();
         self.ui.content.image_view.chooser.connect_clicked(move |_| {
             if let Some(path) = OpenDialog::new(None).run() {
                 let _ = state.ui_event_tx.send(UiEvent::SetImageLabel(path));
-                set_hash_widget(&state, &ui);
             }
         });
     }
@@ -35,11 +33,8 @@ impl App {
             if let Some(uri) = data.text() {
                 if uri.starts_with("file://") {
                     let path = Path::new(&uri[7..uri.len() - 1]);
-                    if path.extension().map_or(false, |ext| ext == "iso" || ext == "img")
-                        && path.exists()
-                    {
+                    if is_supported_image_path(path) && path.exists() {
                         let _ = state.ui_event_tx.send(UiEvent::SetImageLabel(path.to_path_buf()));
-                        set_hash_widget(&state, &ui);
                     }
                 }
             }
@@ -50,7 +45,6 @@ impl App {
 fn set_hash_widget(state: &State, ui: &GtkUi) {
     let hash = &ui.content.image_view.hash;
 
-    let path = state.image_path.borrow();
     let kind = match hash.active() {
         Some(1) => "SHA512",
         Some(2) => "SHA256",
@@ -63,5 +57,6 @@ fn set_hash_widget(state: &State, ui: &GtkUi) {
     ui.content.image_view.chooser_container.set_visible_child_name("checksum");
     ui.content.image_view.set_hash_sensitive(false);
 
+    let path = state.image_path.borrow();
     let _ = state.back_event_tx.send(BackgroundEvent::GenerateHash(PathBuf::from(&*path), kind));
 }

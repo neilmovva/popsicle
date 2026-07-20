@@ -1,9 +1,9 @@
 use super::View;
 use crate::fl;
 use crate::misc;
-use dbus_udisks2::DiskDevice;
 use gtk;
 use gtk::prelude::*;
+use popsicle::DiskDevice;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -95,11 +95,11 @@ impl DevicesView {
         let nselected = Rc::new(Cell::new(0));
 
         for device in devices {
-            let valid_size = device.parent.size >= image_size;
+            let valid_size = device.size() >= image_size;
 
             let label = &misc::device_label(device);
 
-            let size_str = bytesize::to_string(device.parent.size, true);
+            let size_str = bytesize::to_string(device.size(), true);
             let name = if valid_size {
                 format!("<b>{}</b>\n{}", label, size_str)
             } else {

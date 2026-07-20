@@ -18,6 +18,11 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    if env::var_os("GDK_BACKEND").is_none() {
+        env::set_var("GDK_BACKEND", "quartz");
+    }
+
     let localizer = crate::localize::localizer();
     let requested_languages = DesktopLanguageRequester::requested_languages();
 
@@ -38,7 +43,7 @@ fn main() {
         let path = PathBuf::from(iso_argument);
         if path.extension().map_or(false, |ext| {
             let lower_ext = ext.to_str().expect("Could not convert CStr to Str").to_lowercase();
-            lower_ext == "iso" || lower_ext == "img"
+            lower_ext == "iso" || lower_ext == "img" || lower_ext == "zst" || lower_ext == "zstd"
         }) && path.exists()
         {
             let _ = app.state.ui_event_tx.send(UiEvent::SetImageLabel(path));

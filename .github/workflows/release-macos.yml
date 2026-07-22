@@ -74,7 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew bundle --file=macos/Brewfile --no-lock
+          brew bundle --file=macos/Brewfile
 
       - name: Run tests
         shell: bash

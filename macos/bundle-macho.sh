@@ -202,10 +202,6 @@ while [ "$scan_index" -lt "${#scan_sources[@]}" ]; do
     scan_index=$((scan_index + 1))
 done
 
-for destination in "${scan_destinations[@]}"; do
-    codesign --remove-signature "$destination" 2>/dev/null || true
-done
-
 reference_for_kind=
 make_bundle_reference() {
     local kind=$1

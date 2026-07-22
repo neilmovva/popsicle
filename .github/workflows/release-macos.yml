@@ -1,0 +1,389 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Jobs opt in to only the permissions they need.
+permissions: {}
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+jobs:
+  build:
+    name: Build and test unsigned app
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+    steps:
+      - name: Check out release source
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.ref }}
+
+      - name: Validate release ref
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            echo "Manual releases must be run from an existing version tag." >&2
+            exit 1
+          fi
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Release tag must look like v1.2.3 or v1.2.3-rc.1." >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          source_sha="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$source_sha" ]]; then
+            echo "Checked-out commit does not match $GITHUB_REF." >&2
+            exit 1
+          fi
+
+          echo "release_tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm Apple Silicon runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "arm64" ]]
+
+      - name: Install build dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew bundle --file=macos/Brewfile --no-lock
+
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          # popsicle_cli remains Linux-only; test the portable library and GUI.
+          cargo test --locked -p popsicle -p popsicle_gtk
+
+      - name: Build self-contained app
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          RELEASE_VERSION="${RELEASE_VERSION%%-*}"
+          export RELEASE_VERSION
+          macos/build-app.sh
+
+      - name: Audit bundled dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          failures=0
+          while IFS= read -r -d '' candidate; do
+            if ! file -b "$candidate" | grep -q 'Mach-O'; then
+              continue
+            fi
+            while IFS= read -r dependency; do
+              case "$dependency" in
+                /System/Library/*|/usr/lib/*|@rpath/*|@loader_path/*|@executable_path/*)
+                  ;;
+                /*)
+                  echo "Non-system dependency: $candidate -> $dependency" >&2
+                  failures=$((failures + 1))
+                  ;;
+              esac
+            done < <(otool -L "$candidate" | tail -n +2 | awk '{ print $1 }')
+          done < <(find dist/Popsicle.app/Contents -type f -print0)
+
+          if [[ "$failures" -ne 0 ]]; then
+            echo "The app contains $failures non-portable absolute dependencies." >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --all-architectures --verbose=2 \
+            dist/Popsicle.app
+
+      - name: Archive unsigned app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/Popsicle.app dist/Popsicle-unsigned.zip
+
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          name: popsicle-macos-unsigned-${{ github.run_id }}
+          path: dist/Popsicle-unsigned.zip
+          retention-days: 7
+
+  sign:
+    name: Sign and notarize
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 90
+    environment:
+      name: macos-release
+    permissions:
+      contents: read
+    outputs:
+      dmg_name: ${{ steps.finalize.outputs.dmg_name }}
+    steps:
+      - name: Check out audited release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ needs.build.outputs.source_sha }}
+
+      - name: Download unsigned app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: popsicle-macos-unsigned-${{ github.run_id }}
+          path: ${{ runner.temp }}/unsigned
+
+      - name: Restore app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e dist/Popsicle.app ]]; then
+            echo "Refusing to replace an existing dist/Popsicle.app." >&2
+            exit 1
+          fi
+          mkdir -p dist
+          ditto -x -k "$RUNNER_TEMP/unsigned/Popsicle-unsigned.zip" dist
+          [[ -f dist/Popsicle.app/Contents/Info.plist ]]
+
+      - name: Import release credentials
+        env:
+          APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          for secret_name in \
+            APP_STORE_CONNECT_API_KEY_P8_BASE64 \
+            DEVELOPER_ID_P12_BASE64 \
+            DEVELOPER_ID_P12_PASSWORD; do
+            if [[ -z "${!secret_name:-}" ]]; then
+              echo "Missing macos-release environment secret: $secret_name" >&2
+              exit 1
+            fi
+          done
+
+          certificate_path="$RUNNER_TEMP/DeveloperID.p12"
+          api_key_path="$RUNNER_TEMP/AuthKey.p8"
+          keychain_path="$RUNNER_TEMP/popsicle-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode \
+            > "$certificate_path"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_P8_BASE64" | base64 --decode \
+            > "$api_key_path"
+          [[ -s "$certificate_path" && -s "$api_key_path" ]]
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+
+          identity_count="$(security find-identity -v -p codesigning "$keychain_path" | \
+            awk '/"Developer ID Application:/ { count++ } END { print count + 0 }')"
+          if [[ "$identity_count" -ne 1 ]]; then
+            echo "The P12 must contain exactly one valid Developer ID Application identity." >&2
+            security find-identity -v -p codesigning "$keychain_path" >&2 || true
+            exit 1
+          fi
+          identity="$(security find-identity -v -p codesigning "$keychain_path" | \
+            awk -F'"' '/"Developer ID Application:/ { print $2; exit }')"
+
+          {
+            echo "APP_STORE_CONNECT_API_KEY_PATH=$api_key_path"
+            echo "CODESIGN_KEYCHAIN=$keychain_path"
+            echo "DEVELOPER_ID_APPLICATION=$identity"
+          } >> "$GITHUB_ENV"
+
+      - name: Create signed and notarized disk image
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$APP_STORE_CONNECT_KEY_ID" ]]
+          [[ -n "$APP_STORE_CONNECT_ISSUER_ID" ]]
+          macos/release-dmg.sh
+
+      - name: Remove release credentials
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -u
+          keychain_path="${CODESIGN_KEYCHAIN:-$RUNNER_TEMP/popsicle-signing.keychain-db}"
+          security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+          rm -f -- "$RUNNER_TEMP/DeveloperID.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Verify and checksum final disk image
+        id: finalize
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg_name="Popsicle-${RELEASE_TAG}-arm64.dmg"
+          dmg_path="dist/$dmg_name"
+          [[ -f "$dmg_path" ]]
+
+          hdiutil verify "$dmg_path"
+          codesign --verify --verbose=4 "$dmg_path"
+          xcrun stapler validate -v "$dmg_path"
+          spctl --assess --type open --context context:primary-signature \
+            --verbose=4 "$dmg_path"
+
+          (
+            cd dist
+            shasum -a 256 "$dmg_name" > SHA256SUMS
+          )
+          echo "dmg_name=$dmg_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          compression-level: 0
+          if-no-files-found: error
+          name: popsicle-macos-release-${{ github.run_id }}
+          path: |
+            dist/${{ steps.finalize.outputs.dmg_name }}
+            dist/SHA256SUMS
+          retention-days: 14
+
+  publish:
+    name: Attest and publish GitHub release
+    needs:
+      - build
+      - sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Download signed release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: popsicle-macos-release-${{ github.run_id }}
+          path: release
+
+      - name: Verify release files
+        env:
+          DMG_NAME: ${{ needs.sign.outputs.dmg_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -f "release/$DMG_NAME" ]]
+          [[ -f release/SHA256SUMS ]]
+          (
+            cd release
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Attest final release files
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: |
+            release/${{ needs.sign.outputs.dmg_name }}
+            release/SHA256SUMS
+
+      - name: Create draft release, upload assets, then publish
+        env:
+          DMG_NAME: ${{ needs.sign.outputs.dmg_name }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_state="$(gh release view "$RELEASE_TAG" \
+            --json isDraft --jq .isDraft 2>/dev/null || true)"
+          case "$release_state" in
+            "")
+              release_flags=(
+                --draft
+                --generate-notes
+                --title "Popsicle $RELEASE_TAG"
+                --verify-tag
+              )
+              if [[ "$RELEASE_TAG" == *-* ]]; then
+                release_flags+=(--prerelease)
+              fi
+              gh release create "$RELEASE_TAG" \
+                "${release_flags[@]}" \
+                "release/$DMG_NAME" \
+                release/SHA256SUMS
+              ;;
+            true)
+              gh release upload "$RELEASE_TAG" \
+                "release/$DMG_NAME" \
+                release/SHA256SUMS \
+                --clobber
+              ;;
+            false)
+              echo "Release $RELEASE_TAG is already published; refusing to replace it." >&2
+              exit 1
+              ;;
+            *)
+              echo "Unexpected release state: $release_state" >&2
+              exit 1
+              ;;
+          esac
+
+          actual_assets="$(gh release view "$RELEASE_TAG" --json assets \
+            --jq '.assets[].name' | LC_ALL=C sort)"
+          expected_assets="$(printf '%s\n' "$DMG_NAME" SHA256SUMS | LC_ALL=C sort)"
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo "Draft contains unexpected or missing assets; leaving it unpublished." >&2
+            printf 'Expected:\n%s\nActual:\n%s\n' \
+              "$expected_assets" "$actual_assets" >&2
+            exit 1
+          fi
+          if [[ "$(gh release view "$RELEASE_TAG" \
+            --json isDraft --jq .isDraft)" != "true" ]]; then
+            echo "Release stopped being a draft before publication." >&2
+            exit 1
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false

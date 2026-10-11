@@ -13,18 +13,16 @@ pub trait Progress {
 }
 
 async fn sync_device_file(file: &File) -> std::io::Result<()> {
-    file.sync_all().await?;
-
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::{fs::FileTypeExt, io::AsRawFd};
 
         let file_type = file.metadata().await?.file_type();
         if file_type.is_block_device() || file_type.is_char_device() {
-            synchronize_macos_disk(file.as_raw_fd())?;
+            return synchronize_macos_disk(file.as_raw_fd());
         }
     }
-    Ok(())
+    file.sync_all().await
 }
 
 #[cfg(target_os = "macos")]
@@ -42,6 +40,18 @@ const DKIOCSYNCHRONIZE: libc::c_ulong = 0x8018_6416;
 
 #[cfg(target_os = "macos")]
 fn synchronize_macos_disk(descriptor: std::os::unix::io::RawFd) -> std::io::Result<()> {
+    // Rust's sync_all uses F_FULLFSYNC on macOS, which is a filesystem
+    // operation unsupported by disk device nodes. Drain the buffered device
+    // with fsync, then explicitly flush the media's hardware cache.
+    loop {
+        if unsafe { libc::fsync(descriptor) } == 0 {
+            break;
+        }
+        let why = std::io::Error::last_os_error();
+        if why.kind() != std::io::ErrorKind::Interrupted {
+            return Err(std::io::Error::new(why.kind(), format!("disk fsync: {}", why)));
+        }
+    }
     let request = DkSynchronize::default();
     loop {
         let result = unsafe { libc::ioctl(descriptor, DKIOCSYNCHRONIZE, &request) };
@@ -50,7 +60,7 @@ fn synchronize_macos_disk(descriptor: std::os::unix::io::RawFd) -> std::io::Resu
         }
         let why = std::io::Error::last_os_error();
         if why.kind() != std::io::ErrorKind::Interrupted {
-            return Err(why);
+            return Err(std::io::Error::new(why.kind(), format!("DKIOCSYNCHRONIZE: {}", why)));
         }
     }
 }
@@ -110,6 +120,18 @@ mod tests {
         assert_eq!(std::mem::size_of::<DkSynchronize>(), 24);
         assert_eq!(DKIOCSYNCHRONIZE, 0x8018_6416);
         assert_eq!(DkSynchronize::default().options, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn device_sync_reaches_media_ioctl_without_filesystem_fullfsync() {
+        executor::block_on(async {
+            // This harmless character device accepts fsync, but has no media
+            // cache ioctl. Distinguish that expected failure from F_FULLFSYNC.
+            let device = async_std::fs::File::open("/dev/null").await.unwrap();
+            let error = sync_device_file(&device).await.unwrap_err();
+            assert!(error.to_string().starts_with("DKIOCSYNCHRONIZE:"), "{}", error);
+        });
     }
 }
 

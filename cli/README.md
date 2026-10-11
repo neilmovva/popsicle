@@ -7,7 +7,9 @@ Use `$HOME/.local/bin/popsicle` directly if that directory is not on PATH.
 Commands emit newline-delimited JSON with `schema_version: 1`; help and version
 are plain text. Exit status is 0 for success, 1 for operational failures, and 2
 for invalid arguments. Never infer successful flashing from progress alone:
-require exit 0 and the final `complete` event with `verified: true`.
+require exit 0 and the final `complete` event with `verified: true` and
+`ejected: true`. Successful flashing automatically ejects the original device
+after verification and closing its descriptors; an ejection failure is an error.
 
 ```sh
 popsicle list

@@ -249,6 +249,14 @@ fn revalidate(device: &DiskDevice) -> Result<()> {
     Ok(())
 }
 
+/// Eject only the original attachment, after all flashing descriptors are closed.
+pub fn eject_device(device: &DiskDevice) -> Result<()> {
+    revalidate(device)?;
+    run_diskutil(&[OsStr::new("eject"), device.path.as_os_str()])
+        .with_context(|| format!("could not eject {}", device.path.display()))?;
+    Ok(())
+}
+
 fn trigger_removable_volume_consent(path: &Path) -> Result<()> {
     let path = path_cstring(path)?;
     let descriptor = unsafe {

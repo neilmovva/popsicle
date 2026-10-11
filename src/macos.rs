@@ -17,6 +17,9 @@ use std::{
 };
 
 const AUTHOPEN: &str = "/usr/libexec/authopen";
+// authopen adds O_NOFOLLOW_ANY itself. Combining it with O_NOFOLLOW
+// makes open(2) fail with EINVAL on current macOS.
+const AUTHOPEN_FLAGS: i32 = libc::O_RDWR | libc::O_SYNC;
 const DISKUTIL: &str = "/usr/sbin/diskutil";
 const AUTHORIZATION_EXTERNAL_FORM_LENGTH: usize = 32;
 const AUTHORIZATION_FLAG_INTERACTION_ALLOWED: u32 = 1 << 0;
@@ -341,7 +344,7 @@ fn open_with_authorization(path: &Path) -> Result<File> {
         .arg("-extauth")
         .arg("-stdoutpipe")
         .arg("-o")
-        .arg((libc::O_RDWR | libc::O_SYNC | libc::O_NOFOLLOW).to_string())
+        .arg(AUTHOPEN_FLAGS.to_string())
         .arg(path)
         .stdin(Stdio::piped())
         .stdout(child_stdout)
@@ -646,5 +649,24 @@ mod tests {
         assert!(is_whole_disk_identifier("disk7"));
         assert!(!is_whole_disk_identifier("disk7s1"));
         assert!(!is_whole_disk_identifier("rdisk7"));
+    }
+
+    #[test]
+    fn authopen_flags_return_a_descriptor_without_conflicting_nofollow_flags() {
+        // /dev/null needs no authorization and cannot touch a user's disk.
+        // Exercise the real helper, including flags it adds internally.
+        let (receiver, sender) = UnixStream::pair().unwrap();
+        let child = Command::new(AUTHOPEN)
+            .args(["-stdoutpipe", "-o", &AUTHOPEN_FLAGS.to_string(), "/dev/null"])
+            .stdin(Stdio::null())
+            .stdout(unsafe { Stdio::from_raw_fd(sender.into_raw_fd()) })
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let descriptor = receive_descriptor(&receiver);
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", diagnostics(&output.stderr));
+        let file = unsafe { File::from_raw_fd(descriptor.unwrap()) };
+        assert!(file.metadata().unwrap().file_type().is_char_device());
     }
 }

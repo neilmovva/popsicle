@@ -28,10 +28,15 @@ futures = "0.3.30"
 futures_codec = "0.4.1"
 libc = "0.2.151"
 memchr = "2.7.1"
-mnt = "0.3.1"
 ron = "0.8.1"
 serde = { version = "1.0.194", features = ["derive"] }
 srmw = "0.1.1"
 thiserror = "1.0.56"
 zstd = "=0.13.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mnt = "0.3.1"
 usb-disk-probe = "0.2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "=1.6.0"

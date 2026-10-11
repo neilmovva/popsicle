@@ -1,0 +1,3 @@
+brew "gtk+3"
+brew "adwaita-icon-theme"
+brew "pkgconf"

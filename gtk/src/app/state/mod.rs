@@ -1,9 +1,11 @@
 use crate::app::events::{self, BackgroundEvent, UiEvent};
 use atomic::Atomic;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use dbus_udisks2::DiskDevice;
+#[cfg(target_os = "linux")]
 use libc;
+use popsicle::DiskDevice;
 use std::cell::{Cell, RefCell};
+#[cfg(target_os = "linux")]
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
@@ -38,6 +40,7 @@ impl State {
         let (back_event_tx, back_event_rx) = unbounded();
         let (ui_event_tx, ui_event_rx) = unbounded();
 
+        #[cfg(target_os = "linux")]
         // If running in pkexec or sudo, restore home directory for open dialog,
         // and then downgrade permissions back to a regular user.
         if let Ok(pkexec_uid) = env::var("PKEXEC_UID").or_else(|_| env::var("SUDO_UID")) {
@@ -66,6 +69,7 @@ impl State {
 }
 
 /// Downgrades the permissions of the current thread to the specified user and group ID.
+#[cfg(target_os = "linux")]
 fn downgrade_permissions(uid: u32, gid: u32) {
     unsafe {
         libc::setresgid(gid, gid, gid);

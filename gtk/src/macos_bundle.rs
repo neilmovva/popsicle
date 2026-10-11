@@ -33,7 +33,7 @@ pub fn configure() -> io::Result<()> {
     )?;
 
     env::set_var("GDK_PIXBUF_MODULE_FILE", pixbuf_cache);
-    env::set_var("GDK_PIXBUF_MODULEDIR", resources.join("lib/gdk-pixbuf-2.0/2.10.0/loaders"));
+    env::set_var("GDK_PIXBUF_MODULEDIR", contents.join("PlugIns"));
     env::set_var("GTK_IM_MODULE_FILE", immodules_cache);
     env::set_var("GTK_DATA_PREFIX", &resources);
     env::set_var("GSETTINGS_SCHEMA_DIR", resources.join("share/glib-2.0/schemas"));

@@ -36,6 +36,8 @@ The resulting `dist/Popsicle.app` must be self-contained. In particular, every
 non-system dynamic library must be inside the bundle and referenced through
 `@rpath`, `@loader_path`, or `@executable_path`. Release packaging stops if it
 finds an absolute dependency outside `/System/Library` or `/usr/lib`.
+GTK and image-loader binaries live directly in `Contents/PlugIns`; only their
+cache templates live in `Resources`, as required by Apple's bundle checks.
 
 ## Local packaging tests
 

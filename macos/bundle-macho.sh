@@ -66,13 +66,13 @@ scan_sources+=("$(canonical_path "$(dirname "$main_binary_source")/popsicle")")
 scan_destinations+=("$contents/MacOS/popsicle")
 scan_kinds+=(main)
 
-for module in "$contents"/Resources/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so; do
+for module in "$contents"/PlugIns/libpixbufloader*.so; do
     [ -f "$module" ] || continue
     scan_sources+=("$(canonical_path "$pixbuf_module_source/$(basename "$module")")")
     scan_destinations+=("$module")
     scan_kinds+=(module)
 done
-for module in "$contents"/Resources/lib/gtk-3.0/3.0.0/immodules/*.so; do
+for module in "$contents"/PlugIns/im-*.so; do
     [ -f "$module" ] || continue
     scan_sources+=("$(canonical_path "$gtk_im_module_source/$(basename "$module")")")
     scan_destinations+=("$module")
@@ -212,7 +212,7 @@ make_bundle_reference() {
     case "$kind" in
         main) reference_for_kind="@rpath/$name" ;;
         framework) reference_for_kind="@loader_path/$name" ;;
-        module) reference_for_kind="@loader_path/../../../../../Frameworks/$name" ;;
+        module) reference_for_kind="@loader_path/../Frameworks/$name" ;;
         *) printf 'error: unknown Mach-O kind: %s\n' "$kind" >&2; exit 1 ;;
     esac
 }

@@ -459,7 +459,12 @@ staple_with_retry() {
 
 if [ "$mode" = release ]; then
     if command -v syspolicy_check >/dev/null 2>&1; then
-        syspolicy_check notary-submission "$stage_app" --verbose
+        if ! syspolicy_check notary-submission "$stage_app" --verbose; then
+            # The local preflight can return generic Gatekeeper errors before
+            # a ticket exists. Apple acceptance and final Gatekeeper checks
+            # below remain mandatory; collect the authoritative service result.
+            warn "local notarization preflight failed; submitting for Apple's diagnosis"
+        fi
     else
         warn "syspolicy_check is unavailable; relying on codesign and notarytool"
     fi

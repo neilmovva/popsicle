@@ -131,8 +131,8 @@ ditto "$gtk_prefix/share/icons/hicolor" "$resources/share/icons/hicolor"
 ditto "$adwaita_prefix/share/icons/Adwaita" "$resources/share/icons/Adwaita"
 
 pixbuf_bundle_dir="$resources/lib/gdk-pixbuf-2.0/$pixbuf_binary_version"
-pixbuf_loader_bundle_dir="$pixbuf_bundle_dir/loaders"
-mkdir -p "$pixbuf_loader_bundle_dir"
+pixbuf_loader_bundle_dir="$contents/PlugIns"
+mkdir -p "$pixbuf_loader_bundle_dir" "$pixbuf_bundle_dir"
 pixbuf_module_count=0
 for module in "$pixbuf_module_dir"/*.so; do
     [ -f "$module" ] || continue
@@ -147,25 +147,25 @@ done
 pixbuf_cache_raw="$stage_root/gdk-pixbuf-loaders.cache"
 gdk-pixbuf-query-loaders "$pixbuf_module_dir"/*.so > "$pixbuf_cache_raw"
 CACHE_SOURCE_PREFIX="$pixbuf_module_dir" \
-CACHE_BUNDLE_PREFIX="@POPSICLE_RESOURCES@/lib/gdk-pixbuf-2.0/$pixbuf_binary_version/loaders" \
+CACHE_BUNDLE_PREFIX="@POPSICLE_RESOURCES@/../PlugIns" \
     /usr/bin/perl -pe \
         's/\Q$ENV{CACHE_SOURCE_PREFIX}\E/$ENV{CACHE_BUNDLE_PREFIX}/g' \
         "$pixbuf_cache_raw" > "$pixbuf_bundle_dir/loaders.cache.in"
 
 gtk_im_source_dir="$gtk_libdir/gtk-3.0/$gtk_binary_version/immodules"
-gtk_im_bundle_dir="$resources/lib/gtk-3.0/$gtk_binary_version/immodules"
+gtk_im_bundle_dir="$contents/PlugIns"
 gtk_quartz_module="$gtk_im_source_dir/im-quartz.so"
 [ -f "$gtk_quartz_module" ] || {
     printf 'error: missing GTK Quartz input module: %s\n' "$gtk_quartz_module" >&2
     exit 1
 }
-mkdir -p "$gtk_im_bundle_dir"
+mkdir -p "$gtk_im_bundle_dir" "$resources/lib/gtk-3.0/$gtk_binary_version"
 ditto "$gtk_quartz_module" "$gtk_im_bundle_dir/im-quartz.so"
 
 gtk_im_cache_raw="$stage_root/gtk-immodules.cache"
 gtk-query-immodules-3.0 "$gtk_quartz_module" > "$gtk_im_cache_raw"
 CACHE_SOURCE_PREFIX="$gtk_im_source_dir" \
-CACHE_BUNDLE_PREFIX="@POPSICLE_RESOURCES@/lib/gtk-3.0/$gtk_binary_version/immodules" \
+CACHE_BUNDLE_PREFIX="@POPSICLE_RESOURCES@/../PlugIns" \
 CACHE_LOCALE_SOURCE="$gtk_prefix/share/locale" \
 CACHE_LOCALE_BUNDLE="@POPSICLE_RESOURCES@/share/locale" \
     /usr/bin/perl -pe \
@@ -194,7 +194,7 @@ fi
 "$script_dir/bundle-macho.sh" \
     "$stage_app" "$deployment_target" "$binary" "$pixbuf_module_dir" "$gtk_im_source_dir"
 
-find "$contents/Frameworks" "$resources/lib" -type f \
+find "$contents/Frameworks" "$contents/PlugIns" -type f \
     \( -name '*.dylib' -o -name '*.so' \) -print0 |
 while IFS= read -r -d '' nested_code; do
     codesign --force --sign - --timestamp=none "$nested_code"

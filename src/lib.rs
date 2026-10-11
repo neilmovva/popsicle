@@ -17,7 +17,7 @@ mod task;
 
 pub use self::image::{ImageFormat, ImageReader};
 #[cfg(target_os = "macos")]
-pub use self::macos::{discover_devices, prepare_devices_for_image, DiskDevice};
+pub use self::macos::{discover_devices, eject_device, prepare_devices_for_image, DiskDevice};
 pub use self::task::{Progress, Task};
 
 #[cfg(target_os = "linux")]

@@ -140,7 +140,7 @@ async fn run(args: clap::ArgMatches) -> Result<()> {
     emit(
         json!({"event":"authorizing", "device":device_json(&device), "message":"Approve Popsicle's macOS administrator prompt to erase this drive"}),
     )?;
-    let files = prepare_devices_for_image([device], size)?;
+    let files = prepare_devices_for_image([device.clone()], size)?;
     let failed = Arc::new(AtomicBool::new(false));
     let mut task = Task::new(image, true, size);
     let progress = JsonProgress {
@@ -158,7 +158,9 @@ async fn run(args: clap::ArgMatches) -> Result<()> {
     if failed.load(Ordering::Relaxed) {
         bail!("flashing or verification failed; no successful completion");
     }
-    emit(json!({"event":"complete", "device":disk_path, "bytes_written":size, "verified":true}))?;
+    emit(json!({"event":"ejecting", "device":disk_path}))?;
+    popsicle::eject_device(&device)?;
+    emit(json!({"event":"complete", "device":disk_path, "bytes_written":size, "verified":true, "ejected":true}))?;
     Ok(())
 }
 

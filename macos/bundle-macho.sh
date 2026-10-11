@@ -62,6 +62,9 @@ library_names=()
 scan_sources=("$(canonical_path "$main_binary_source")")
 scan_destinations=("$main_binary")
 scan_kinds=(main)
+scan_sources+=("$(canonical_path "$(dirname "$main_binary_source")/popsicle")")
+scan_destinations+=("$contents/MacOS/popsicle")
+scan_kinds+=(main)
 
 for module in "$contents"/Resources/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so; do
     [ -f "$module" ] || continue

@@ -51,6 +51,11 @@ impl DiskDevice {
     pub fn size(&self) -> u64 {
         self.size
     }
+
+    /// Identifies this attachment, so a reused disk number cannot select new media.
+    pub fn attachment_token(&self) -> String {
+        format!("{}:{}", self.path.display(), self.attachment_id)
+    }
 }
 
 #[derive(Deserialize)]

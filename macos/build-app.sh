@@ -51,7 +51,7 @@ for package_name in gtk+-3.0 gdk-pixbuf-2.0 fontconfig gsettings-desktop-schemas
 done
 
 cd "$repo_dir"
-cargo build --locked --release -p popsicle_gtk
+cargo build --locked --release -p popsicle_gtk -p popsicle_cli
 
 target_dir=${CARGO_TARGET_DIR:-$repo_dir/target}
 case "$target_dir" in
@@ -75,6 +75,7 @@ contents="$stage_app/Contents"
 resources="$contents/Resources"
 mkdir -p "$contents/MacOS" "$contents/Frameworks" "$resources"
 ditto "$binary" "$contents/MacOS/popsicle-gtk"
+ditto "$target_dir/release/popsicle" "$contents/MacOS/popsicle"
 ditto "$script_dir/Info.plist" "$contents/Info.plist"
 
 set_plist_string() {

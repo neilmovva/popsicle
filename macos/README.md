@@ -1,5 +1,8 @@
 # Building and releasing Popsicle for macOS
 
+The app also bundles an agent-friendly CLI. See [CLI usage](../cli/README.md);
+`bash macos/install-cli.sh /Applications/Popsicle.app` installs its command.
+
 Popsicle's public macOS artifact is an Apple Silicon disk image containing a
 self-contained `Popsicle.app` and an `Applications` shortcut. A public release
 must be signed with a **Developer ID Application** certificate, notarized by

@@ -80,8 +80,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # popsicle_cli remains Linux-only; test the portable library and GUI.
-          cargo test --locked -p popsicle -p popsicle_gtk
+          cargo test --locked -p popsicle -p popsicle_gtk -p popsicle_cli
 
       - name: Build self-contained app
         env:

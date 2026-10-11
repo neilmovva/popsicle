@@ -57,8 +57,10 @@ impl<'a> Progress for FlashProgress<'a> {
     type Device = ();
 
     fn message(&mut self, _device: &(), kind: &str, message: &str) {
-        self.errors[self.id]
-            .set(Err(FlashError { kind: kind.to_string(), message: message.to_string() }));
+        if kind == "E" {
+            self.errors[self.id]
+                .set(Err(FlashError { kind: kind.to_string(), message: message.to_string() }));
+        }
     }
 
     fn finish(&mut self) {
@@ -127,13 +129,28 @@ impl FlashRequest {
         // How many bytes to write at a given time.
         let mut bucket = [0u8; 64 * 1024];
 
-        let mut task = Task::new(image, false, expanded_size);
+        let mut task = Task::new(image, true, expanded_size);
         for (i, file) in files.into_iter().enumerate() {
             let progress = FlashProgress { request: self, errors: errors_cells, id: i };
             task.subscribe(file, (), progress);
         }
 
         let res = executor::block_on(task.process(&mut bucket));
+
+        // process consumes the task, closing its disk descriptors before eject.
+        // Never eject a failed or incompletely verified destination.
+        if res.is_ok() {
+            for (device, result) in self.destinations.iter().zip(errors.iter_mut()) {
+                if result.is_ok() {
+                    if let Err(why) = popsicle::eject_device(device) {
+                        *result = Err(FlashError {
+                            kind: "E".to_owned(),
+                            message: format!("written and verified, but ejection failed: {:#}", why),
+                        });
+                    }
+                }
+            }
+        }
 
         Ok((res, errors))
     }

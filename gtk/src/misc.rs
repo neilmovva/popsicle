@@ -1,5 +1,5 @@
-use dbus_udisks2::DiskDevice;
 use gtk::{self, prelude::*, SelectionData};
+use popsicle::DiskDevice;
 
 // Implements drag and drop support for a GTK widget.
 pub fn drag_and_drop<W, F>(widget: &W, action: F)
@@ -29,14 +29,5 @@ where
 }
 
 pub fn device_label(device: &DiskDevice) -> String {
-    if device.drive.vendor.is_empty() {
-        format!("{} ({})", device.drive.model, device.parent.preferred_device.display())
-    } else {
-        format!(
-            "{} {} ({})",
-            device.drive.vendor,
-            device.drive.model,
-            device.parent.preferred_device.display()
-        )
-    }
+    device.label()
 }

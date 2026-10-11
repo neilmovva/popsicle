@@ -1,10 +1,11 @@
 use crate::app::events::FlashResult;
+use anyhow::{ensure, Context};
 use atomic::Atomic;
 use dbus::arg::{OwnedFd, RefArg, Variant};
 use dbus::blocking::{Connection, Proxy};
 use dbus_udisks2::DiskDevice;
 use futures::executor;
-use popsicle::{Progress, Task};
+use popsicle::{ImageReader, Progress, Task};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -28,6 +29,7 @@ unsafe impl bytemuck::NoUninit for FlashStatus {}
 
 pub struct FlashRequest {
     source: Option<File>,
+    expanded_size: u64,
     destinations: Vec<Arc<DiskDevice>>,
     status: Arc<Atomic<FlashStatus>>,
     progress: Arc<Vec<Atomic<u64>>>,
@@ -80,12 +82,20 @@ impl<'a> Progress for FlashProgress<'a> {
 impl FlashRequest {
     pub fn new(
         source: File,
+        expanded_size: u64,
         destinations: Vec<Arc<DiskDevice>>,
         status: Arc<Atomic<FlashStatus>>,
         progress: Arc<Vec<Atomic<u64>>>,
         finished: Arc<Vec<Atomic<bool>>>,
     ) -> FlashRequest {
-        FlashRequest { source: Some(source), destinations, status, progress, finished }
+        FlashRequest {
+            source: Some(source),
+            expanded_size,
+            destinations,
+            status,
+            progress,
+            finished,
+        }
     }
 
     pub fn write(mut self) -> FlashResult {
@@ -104,6 +114,15 @@ impl FlashRequest {
     }
 
     fn write_inner(&self, source: File) -> FlashResult {
+        // Validate the stream before opening or unmounting any destination.
+        let mut image = ImageReader::new(source)?;
+        let expanded_size = executor::block_on(image.inspect())
+            .context("could not decode the selected image before flashing")?;
+        ensure!(
+            self.expanded_size == expanded_size,
+            "selected image size changed; choose the image again"
+        );
+
         // Unmount the devices beforehand.
         for device in &self.destinations {
             let _ = udisks_unmount(&device.parent.path);
@@ -125,7 +144,7 @@ impl FlashRequest {
         // How many bytes to write at a given time.
         let mut bucket = [0u8; 64 * 1024];
 
-        let mut task = Task::new(source.into(), false);
+        let mut task = Task::new(image, false, expanded_size);
         for (i, file) in files.into_iter().enumerate() {
             let progress = FlashProgress { request: self, errors: errors_cells, id: i };
             task.subscribe(file.into(), (), progress);

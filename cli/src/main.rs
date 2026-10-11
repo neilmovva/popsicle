@@ -12,11 +12,7 @@ extern crate fomat_macros;
 mod localize;
 
 use anyhow::Context;
-use async_std::{
-    fs::OpenOptions,
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
-};
+use async_std::path::{Path, PathBuf};
 
 use clap::{builder::Arg, ArgAction, ArgMatches, Command};
 use futures::{
@@ -27,7 +23,7 @@ use futures::{
 use i18n_embed::DesktopLanguageRequester;
 use once_cell::sync::Lazy;
 use pbr::{MultiBar, Pipe, ProgressBar, Units};
-use popsicle::{mnt, Progress, Task};
+use popsicle::{mnt, ImageReader, Progress, Task};
 use std::{
     io::{self, Write},
     process, thread,
@@ -106,18 +102,11 @@ async fn popsicle(
         .with_context(|| fl!("error-image-not-set"))?
         .clone();
 
-    let image = OpenOptions::new()
-        .custom_flags(libc::O_SYNC)
-        .read(true)
-        .open(&image_path)
-        .await
+    let image = std::fs::File::open(&image_path)
         .with_context(|| fl!("error-image-open", image_path = image_path.clone()))?;
 
-    let image_size = image
-        .metadata()
-        .await
-        .map(|x| x.len())
-        .with_context(|| fl!("error-image-metadata", image_path = image_path.clone()))?;
+    let mut image = ImageReader::new(image)?;
+    let image_size = image.inspect().await.context("could not inspect the image")?;
 
     let mut disk_args = Vec::new();
     if matches.get_flag("all") {
@@ -167,7 +156,7 @@ async fn popsicle(
         println!();
 
         let mb = MultiBar::new();
-        let mut task = Task::new(image, check);
+        let mut task = Task::new(image, check, image_size);
 
         for (disk_path, disk) in disks {
             let pb = InteractiveProgress::new(cascade! {
@@ -190,7 +179,7 @@ async fn popsicle(
     } else {
         let (etx, erx) = mpsc::unbounded();
         let mut paths = Vec::new();
-        let mut task = Task::new(image, check);
+        let mut task = Task::new(image, check, image_size);
 
         for (disk_path, disk) in disks {
             let pb = MachineProgress::new(paths.len(), etx.clone());

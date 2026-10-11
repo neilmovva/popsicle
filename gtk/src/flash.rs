@@ -1,22 +1,13 @@
 use crate::app::events::FlashResult;
 use anyhow::{ensure, Context};
 use atomic::Atomic;
-use dbus::arg::{OwnedFd, RefArg, Variant};
-use dbus::blocking::{Connection, Proxy};
-use dbus_udisks2::DiskDevice;
 use futures::executor;
-use popsicle::{ImageReader, Progress, Task};
+use popsicle::{DiskDevice, ImageReader, Progress, Task};
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::fs::File;
-use std::os::unix::io::FromRawFd;
-use std::str;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-type UDisksOptions = HashMap<&'static str, Variant<Box<dyn RefArg>>>;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum FlashStatus {
@@ -114,29 +105,21 @@ impl FlashRequest {
     }
 
     fn write_inner(&self, source: File) -> FlashResult {
-        // Validate the stream before opening or unmounting any destination.
-        let mut image = ImageReader::new(source)?;
+        // Fully inspect the stream again before macOS requests authorization or
+        // any destination is unmounted.
+        let mut image =
+            ImageReader::new(source).context("could not open the selected image for flashing")?;
         let expanded_size = executor::block_on(image.inspect())
             .context("could not decode the selected image before flashing")?;
         ensure!(
             self.expanded_size == expanded_size,
-            "selected image size changed; choose the image again"
+            "selected image decoded size changed after inspection: expected {} bytes, found {}; choose the image again",
+            self.expanded_size,
+            expanded_size
         );
 
-        // Unmount the devices beforehand.
-        for device in &self.destinations {
-            let _ = udisks_unmount(&device.parent.path);
-            for partition in &device.partitions {
-                let _ = udisks_unmount(&partition.path);
-            }
-        }
-
-        // Then open them for writing to.
-        let mut files = Vec::new();
-        for device in &self.destinations {
-            let file = udisks_open(&device.parent.path)?;
-            files.push(file);
-        }
+        let devices = self.destinations.iter().map(|device| (**device).clone());
+        let files = popsicle::prepare_devices_for_image(devices, expanded_size)?;
 
         let mut errors = vec![Ok(()); files.len()];
         let errors_cells = Cell::from_mut(&mut errors as &mut [_]).as_slice_of_cells();
@@ -147,48 +130,11 @@ impl FlashRequest {
         let mut task = Task::new(image, false, expanded_size);
         for (i, file) in files.into_iter().enumerate() {
             let progress = FlashProgress { request: self, errors: errors_cells, id: i };
-            task.subscribe(file.into(), (), progress);
+            task.subscribe(file, (), progress);
         }
 
         let res = executor::block_on(task.process(&mut bucket));
 
         Ok((res, errors))
     }
-}
-
-fn udisks_unmount(dbus_path: &str) -> anyhow::Result<()> {
-    let connection = Connection::new_system()?;
-
-    let dbus_path = ::dbus::strings::Path::new(dbus_path).map_err(anyhow::Error::msg)?;
-
-    let proxy = Proxy::new("org.freedesktop.UDisks2", dbus_path, Duration::new(25, 0), &connection);
-
-    let mut options = UDisksOptions::new();
-    options.insert("force", Variant(Box::new(true)));
-    let res: Result<(), _> =
-        proxy.method_call("org.freedesktop.UDisks2.Filesystem", "Unmount", (options,));
-
-    if let Err(err) = res {
-        if err.name() != Some("org.freedesktop.UDisks2.Error.NotMounted") {
-            return Err(anyhow::Error::new(err));
-        }
-    }
-
-    Ok(())
-}
-
-fn udisks_open(dbus_path: &str) -> anyhow::Result<File> {
-    let connection = Connection::new_system()?;
-
-    let dbus_path = ::dbus::strings::Path::new(dbus_path).map_err(anyhow::Error::msg)?;
-
-    let proxy =
-        Proxy::new("org.freedesktop.UDisks2", &dbus_path, Duration::new(25, 0), &connection);
-
-    let mut options = UDisksOptions::new();
-    options.insert("flags", Variant(Box::new(libc::O_SYNC)));
-    let res: (OwnedFd,) =
-        proxy.method_call("org.freedesktop.UDisks2.Block", "OpenDevice", ("rw", options))?;
-
-    Ok(unsafe { File::from_raw_fd(res.0.into_fd()) })
 }

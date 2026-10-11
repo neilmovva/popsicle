@@ -4,8 +4,8 @@ use crate::hash::hasher;
 use anyhow::{bail, Context};
 use blake2::Blake2b512;
 use crossbeam_channel::{Receiver, Sender};
-use dbus_udisks2::{DiskDevice, Disks, UDisks2};
 use md5::Md5;
+use popsicle::DiskDevice;
 use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Sha512;
@@ -79,7 +79,7 @@ pub fn background_thread(events_tx: Sender<UiEvent>, events_rx: Receiver<Backgro
                     match refresh_devices() {
                         Ok(devices) => {
                             let new_device_paths: Vec<_> =
-                                devices.iter().map(|d| d.drive.path.clone()).collect();
+                                devices.iter().map(|device| device.path().to_owned()).collect();
                             if new_device_paths != device_paths {
                                 device_paths = new_device_paths;
                                 let _ = events_tx.send(UiEvent::RefreshDevices(devices));
@@ -128,17 +128,11 @@ fn is_zstandard_path(path: &Path) -> bool {
 }
 
 fn refresh_devices() -> anyhow::Result<Box<[Arc<DiskDevice>]>> {
-    let udisks = UDisks2::new()?;
-    let devices = Disks::new(&udisks).devices;
-    let mut devices = devices
+    Ok(popsicle::discover_devices()?
         .into_iter()
-        .filter(|d| d.drive.connection_bus == "usb" || d.drive.connection_bus == "sdio")
-        .filter(|d| d.parent.size != 0)
         .map(Arc::new)
         .collect::<Vec<_>>()
-        .into_boxed_slice();
-    devices.sort_by_key(|d| d.drive.id.clone());
-    Ok(devices)
+        .into_boxed_slice())
 }
 
 #[cfg(test)]

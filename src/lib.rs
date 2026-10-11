@@ -5,30 +5,43 @@ extern crate derive_new;
 #[macro_use]
 extern crate thiserror;
 
+#[cfg(target_os = "linux")]
 pub extern crate mnt;
 
 pub mod codec;
 
 mod image;
+#[cfg(target_os = "macos")]
+mod macos;
 mod task;
 
 pub use self::image::{ImageFormat, ImageReader};
+#[cfg(target_os = "macos")]
+pub use self::macos::{discover_devices, prepare_devices_for_image, DiskDevice};
 pub use self::task::{Progress, Task};
 
+#[cfg(target_os = "linux")]
 use anyhow::Context;
+#[cfg(target_os = "linux")]
 use as_result::MapResult;
+#[cfg(target_os = "linux")]
 use async_std::{
     fs::{self, File, OpenOptions},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
+#[cfg(target_os = "linux")]
 use futures::{executor, prelude::*};
+#[cfg(target_os = "linux")]
 use mnt::MountEntry;
+use std::{io, path::Path};
+#[cfg(target_os = "linux")]
 use std::{
-    io,
     os::unix::{ffi::OsStrExt, fs::FileTypeExt},
+    path::PathBuf,
     process::Command,
 };
+#[cfg(target_os = "linux")]
 use usb_disk_probe::stream::UsbDiskProbe;
 
 #[derive(Debug, Error)]
@@ -93,6 +106,7 @@ pub enum DiskError {
     VerifyMismatch { disk: Box<Path>, x: usize, y: usize },
 }
 
+#[cfg(target_os = "linux")]
 pub async fn usb_disk_devices(disks: &mut Vec<Box<Path>>) -> anyhow::Result<()> {
     let mut stream = UsbDiskProbe::new().await.context("failed to create USB disk probe")?;
 
@@ -109,12 +123,14 @@ pub async fn usb_disk_devices(disks: &mut Vec<Box<Path>>) -> anyhow::Result<()> 
 }
 
 /// Stores all discovered USB disk paths into the supplied `disks` vector.
+#[cfg(target_os = "linux")]
 pub fn get_disk_args(disks: &mut Vec<Box<Path>>) -> Result<(), DiskError> {
     executor::block_on(
         async move { usb_disk_devices(disks).await.map_err(DiskError::DeviceStream) },
     )
 }
 
+#[cfg(target_os = "linux")]
 pub async fn disks_from_args<D: Iterator<Item = Box<Path>>>(
     disk_args: D,
     mounts: &[MountEntry],

@@ -1,40 +1,30 @@
 on:
   push:
   pull_request:
-  release:
-    types: [published]
 
 name: ci
 
-jobs:
-  appimage:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        set-safe-directory: '*'
-    - run: docker run --rm -v "$PWD:/github/workspace" -w "/github/workspace" rust:1.75.0-buster bash appimage.sh
-    - uses: actions/upload-artifact@v4
-      with:
-        if-no-files-found: error
-        name: popsicle-appimage-${{ github.sha }}
-        path: Popsicle_USB_Flasher-*.AppImage*
+permissions:
+  contents: read
 
-  upload-to-release:
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    needs: appimage
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
-    - uses: actions/download-artifact@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        name: popsicle-appimage-${{ github.sha }}
-    - run: printf 'APPIMAGE_FILENAME=%s\n' Popsicle_USB_Flasher-*.AppImage > $GITHUB_ENV
-    - uses: actions/upload-release-asset@v1
+        persist-credentials: false
+    - name: Confirm Apple Silicon runner
+      run: test "$(uname -m)" = arm64
+    - name: Install build dependencies
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ${{ env.APPIMAGE_FILENAME }}
-        asset_name: ${{ env.APPIMAGE_FILENAME }}
-        asset_content_type: application/vnd.appimage
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+      run: brew bundle --file=macos/Brewfile
+    - name: Test macOS library and app
+      run: cargo test --locked -p popsicle -p popsicle_gtk
+    - name: Build and verify portable app
+      run: macos/build-app.sh

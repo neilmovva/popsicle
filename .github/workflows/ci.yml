@@ -25,6 +25,6 @@ jobs:
         HOMEBREW_NO_AUTO_UPDATE: "1"
       run: brew bundle --file=macos/Brewfile
     - name: Test macOS library and app
-      run: cargo test --locked -p popsicle -p popsicle_gtk
+      run: cargo test --locked -p popsicle -p popsicle_gtk -p popsicle_cli
     - name: Build and verify portable app
       run: macos/build-app.sh

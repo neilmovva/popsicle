@@ -80,21 +80,42 @@ impl App {
                     ui.content.image_view.chooser_container.set_visible_child_name("chooser");
                 }
                 Ok(UiEvent::SetImageLabel(path)) => {
-                    if let Ok(file) = File::open(&path) {
-                        let image_size = file.metadata().ok().map_or(0, |m| m.len());
+                    *state.image_path.borrow_mut() = path.clone();
+                    state.image_size.store(0, Ordering::SeqCst);
 
-                        let warning = if is_windows_iso(&file) {
-                            Some(fl!("win-isos-not-supported"))
-                        } else {
-                            None
-                        };
+                    ui.content.image_view.set_hash_sensitive(false);
+                    ui.header.next.set_sensitive(false);
 
-                        ui.content.image_view.set_image(&path, image_size, warning.as_deref());
-                        ui.content.image_view.set_hash_sensitive(true);
-                        ui.header.next.set_sensitive(true);
+                    let _ = state.back_event_tx.send(BackgroundEvent::InspectImage(path));
+                }
+                Ok(UiEvent::ImageInspected(path, result)) => {
+                    if *state.image_path.borrow() != path {
+                        return Continue(true);
+                    }
 
-                        state.image_size.store(image_size, Ordering::SeqCst);
-                        *state.image_path.borrow_mut() = path;
+                    ui.content.image_view.chooser_container.set_visible_child_name("chooser");
+                    match result {
+                        Ok(expanded_size) => {
+                            let warning = File::open(&path)
+                                .ok()
+                                .filter(is_windows_iso)
+                                .map(|_| fl!("win-isos-not-supported"));
+
+                            ui.content.image_view.set_image(
+                                &path,
+                                expanded_size,
+                                warning.as_deref(),
+                            );
+                            ui.content.image_view.set_hash_sensitive(true);
+                            ui.header.next.set_sensitive(true);
+
+                            state.image_size.store(expanded_size, Ordering::SeqCst);
+                        }
+                        Err(why) => {
+                            ui.content.image_view.image_path.set_text(&why.to_string());
+                            ui.content.image_view.set_hash_sensitive(false);
+                            ui.header.next.set_sensitive(false);
+                        }
                     }
                 }
                 Ok(UiEvent::RefreshDevices(devices)) => {
@@ -179,6 +200,7 @@ impl App {
                         let _ =
                             state.back_event_tx.send(BackgroundEvent::Flash(FlashRequest::new(
                                 image,
+                                state.image_size.load(Ordering::SeqCst),
                                 destinations,
                                 flash_status.clone(),
                                 progress.clone(),

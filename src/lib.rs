@@ -9,8 +9,10 @@ pub extern crate mnt;
 
 pub mod codec;
 
+mod image;
 mod task;
 
+pub use self::image::{ImageFormat, ImageReader};
 pub use self::task::{Progress, Task};
 
 use anyhow::Context;
@@ -42,6 +44,12 @@ pub enum ImageError {
     ReadError { why: io::Error },
     #[error("reached EOF prematurely")]
     Eof,
+    #[error("image is empty after decompression")]
+    Empty,
+    #[error("invalid or corrupt Zstandard image: {}", why)]
+    InvalidZstandard { why: io::Error },
+    #[error("expanded image size exceeds the supported range")]
+    ExpandedSizeOverflow,
 }
 
 #[derive(Debug, Error)]

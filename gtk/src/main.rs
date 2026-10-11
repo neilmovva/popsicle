@@ -8,6 +8,8 @@ mod flash;
 mod gresource;
 mod hash;
 mod localize;
+#[cfg(target_os = "macos")]
+mod macos_bundle;
 mod misc;
 
 use crate::app::events::UiEvent;
@@ -19,8 +21,12 @@ use std::path::PathBuf;
 
 fn main() {
     #[cfg(target_os = "macos")]
-    if env::var_os("GDK_BACKEND").is_none() {
-        env::set_var("GDK_BACKEND", "quartz");
+    {
+        macos_bundle::configure().expect("failed to configure bundled GTK runtime");
+
+        if env::var_os("GDK_BACKEND").is_none() {
+            env::set_var("GDK_BACKEND", "quartz");
+        }
     }
 
     let localizer = crate::localize::localizer();

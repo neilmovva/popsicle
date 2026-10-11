@@ -1,4 +1,7 @@
 .cargo/
+.DS_Store
+*.p12
+*.p8
 debian/*
 !debian/source
 !debian/changelog
@@ -8,6 +11,8 @@ debian/*
 !debian/*.install
 !debian/rules
 target/
+dist/
+private/
 vendor/
 vendor.tar
 *.AppImage*

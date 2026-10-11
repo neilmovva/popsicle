@@ -1,12 +1,14 @@
 # Popsicle
 
-Popsicle is a Linux utility for flashing multiple USB devices in parallel, written in [Rust](https://www.rust-lang.org/).
+Popsicle is a utility for flashing multiple USB devices in parallel on Linux and Apple Silicon macOS, written in [Rust](https://www.rust-lang.org/).
 
 ## Build Dependencies
 
 If building the GTK front end, you will be required to install the development dependencies for GTK and D-Bus, usually named `libgtk-3-dev` and `libdbus-1-dev`, respectively. No other dependencies are required to build the CLI or GTK front ends, besides Rust's `cargo` utility.
 
 For those who need to vendor Cargo's crate dependencies which are fetched from [Crates.io](https://crates.io/), you will need to install [cargo-vendor](https://github.com/alexcrichton/cargo-vendor), and then run `make vendor`.
+
+Apple Silicon build, signing, notarization, and GitHub Release instructions are in [macos/README.md](./macos/README.md).
 
 ## Installation Instructions
 
@@ -48,4 +50,3 @@ i18n(eo): Add Esperanto language support
 ```
 
 Translation files can be found [here](./i18n/). We are using [Project Fluent](https://projectfluent.org) for our translations, which should be easier than working with gettext.
-
